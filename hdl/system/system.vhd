@@ -313,6 +313,7 @@ entity system is
 
 		sysmon_clk: in std_logic; -- SYSMON & DNA clock (max 97 MHz)
         sysmon_reset: in std_logic;
+		sysmon_clk_enable: out std_logic; -- from GPIO: enables the SYSMON clock buffer in the clock generator
 
 		adcdaq_reset_async: out std_logic; -- Manual user ADCDAQ reset
 
@@ -729,6 +730,7 @@ begin
 				user_reset         => user_reset, -- output to port
 				ctrl_reset_pulse   => ctrl_reset_pulse, -- output to port
 				sysmon_user_reset  => sysmon_user_reset, -- output to port
+				sysmon_clk_enable  => sysmon_clk_enable, -- output to port
 				ADCDAQ_RESET_ASYNC => ADCDAQ_RESET_ASYNC, -- output to port
 				CHAN_RESET_ASYNC   => chan_reset_async, -- output to port
 				CORR_RESET_ASYNC   => CORR_RESET_ASYNC, -- output to port

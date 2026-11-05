@@ -144,6 +144,7 @@ Clocks and control outputs
 - ``clk200``/``clk200_reset``: 200 MHz system clock and its reset.
 - ``clk10``: 10 MHz backplane reference clock.
 - ``clk10_sel``: 10 MHz reference clock source selection output (CRS platform).
+- ``sysmon_clk_enable``: enables the SYSMON clock buffer (control byte 3, bit 0, default 1). Set to 0 during data taking: the 62.5 MHz SYSMON clock couples into the RF-ADC inputs and appears as a 12.5 MHz comb at 3.2 GSPS (5 clock cycles = 256 samples). Set to 1 before reading the SYSMON or the device DNA.
 - ``dna_clk``: Clock for the FPGA DNA_PORT primitive (max 97 MHz).
 - ``pll_sync``: External PLL SYNC pulse output.
 - ``chan_clk_sel``: Channelizer clock source selection output.

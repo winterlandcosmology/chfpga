@@ -634,6 +634,7 @@ architecture impl of chFPGA is
 	signal adcdaq_reset: std_logic; -- Resets both the reset sequencer and ADCDAQ, triggered by REFCLK sync sequencer or manually
 
 	signal sysmon_user_reset: std_logic; -- from GPIO to SYSMON
+	signal sysmon_clk_enable: std_logic; -- from GPIO to the clock generator (SYSMON clock BUFGCE)
 
 	-- signal RESET: std_logic; -- Internal RESET after the clocks are stable
 	signal user_reset: std_logic := '0'; -- User-controlled global reset
@@ -905,6 +906,7 @@ begin
 			corr_reset_out => corr_reset,
 
 			sysmon_clk => sysmon_clk, -- System monitor clock
+			sysmon_clk_enable => sysmon_clk_enable, -- from GPIO: stops the SYSMON clock when '0'
 			sysmon_reset_out => sysmon_reset,
 
 			-- Channelizer clocks
@@ -1710,6 +1712,7 @@ begin
 
 					sysmon_clk => sysmon_clk,
 					sysmon_reset => sysmon_reset,
+					sysmon_clk_enable => sysmon_clk_enable, -- to the clock generator
 
 
 					chan_clk => chan_clk(0),
