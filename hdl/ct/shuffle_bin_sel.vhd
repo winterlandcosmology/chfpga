@@ -303,6 +303,7 @@ architecture behavioral of shuffle_bin_sel is
 	signal lane: unsigned(3 downto 0); -- Current indexes the lane map
 	signal first_lane_reg: unsigned(3 downto 0);
 	signal last_lane_reg: unsigned(3 downto 0);
+	signal sublane_active: std_logic_vector(0 to NUMBER_OF_INPUTS - 1); -- '1' for the sublanes within [first_lane, last_lane] of each output. Only those data FIFOs are written and OR-ed into the packet flags (trailer) word.
 	signal frame_ctr: unsigned(1 downto 0); -- Counts the current frame number in the output packet
 	signal send_header: std_logic;
 	signal combine_words: std_logic;
@@ -731,7 +732,11 @@ begin
 				else
 					data_fifo_din(i)(31 downto 0) <= s_axis_tdata(i);
 				end if;
-				data_fifo_wr_en(i) <= data_fifo_wr_en_var;
+				-- Only the sublanes this bin selector actually reads (first_lane..last_lane of each
+				-- output) are written. Sublanes outside that range belong to another bin
+				-- selector's outputs: if they were written they would never be drained, and their
+				-- stale FIFO heads used to be OR-ed into the packet flags word at end_of_packet.
+				data_fifo_wr_en(i) <= data_fifo_wr_en_var and sublane_active(i);
 
 			end loop;
 
@@ -871,8 +876,11 @@ begin
 	--    - There is data to be read, as proxied by flags_fifo_valid='1' (the flag word is written when the last data word is written, so we assume there is data if there is a flag)
 	--    - we are processing this specific FIFO lane ((i=lane or (combine_words='1' and  i=(lane or "0001")) or we are processing the packet flag from all lanes (end_of_packet='1').
 	--
-	-- The number of input lanes that are read is set by  ``last_lane``. Not all
-	-- FIFOs are therefore read and are expected to overflow.
+	-- The range of input sublanes that are read is set by ``first_lane``/``last_lane``.
+	-- Sublanes outside that range are neither written nor read (see ``sublane_active``),
+	-- so their FIFOs stay empty and cannot overflow or contaminate the packet flags word.
+	-- (Earlier versions wrote all sublanes; the unread ones overflowed and their stale
+	-- heads were OR-ed into the trailer at end_of_packet, which made the trailer data-dependent.)
 
 	fifo_rd_en_gen0: for j in 0 to NUMBER_OF_OUTPUTS - 1 generate
 
@@ -895,6 +903,7 @@ begin
 		variable frame_header: shuffle_frame_header_struct;
 		variable ix0, ix1: integer range 0 to NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1;
 		variable tdata: slv35_array(0 to NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1);
+		variable tdata_active: slv35_array(0 to NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1); -- tdata with the sublanes outside first_lane..last_lane zeroed (trailer OR only)
 
 		function or_reduce(a : slv35_array) return slv35 is
 
@@ -929,6 +938,12 @@ begin
 
 			first_lane_reg <= first_lane;
 			last_lane_reg <= to_unsigned(max(0, min(to_integer(last_lane), NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1)), 4);
+
+			-- Static per-sublane enable derived from the programmed lane range (semi-static
+			-- configuration; software programs it before releasing the module from reset).
+			for i in 0 to NUMBER_OF_INPUTS - 1 loop
+				sublane_active(i) <= to_std_logic((i mod NUMBER_OF_INPUT_LANES_PER_OUTPUT) >= to_integer(first_lane_reg) and (i mod NUMBER_OF_INPUT_LANES_PER_OUTPUT) <= to_integer(last_lane_reg));
+			end loop;
 
 			------------------------------------
 			-- SYNCHRONOUS RESET : See the end of the block
@@ -992,13 +1007,22 @@ begin
 				-- This is to avoid generating an enable line on the whole bus that is based on a 16:1 mux on the fifo valid signals.
 				for j in 0 to NUMBER_OF_OUTPUTS - 1 loop
 					tdata := data_fifo_dout(j * NUMBER_OF_INPUT_LANES_PER_OUTPUT to (j + 1) * NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1);
+					for k in 0 to NUMBER_OF_INPUT_LANES_PER_OUTPUT - 1 loop
+						if sublane_active(j * NUMBER_OF_INPUT_LANES_PER_OUTPUT + k) = '1' then
+							tdata_active(k) := tdata(k);
+						else
+							tdata_active(k) := (others => '0');
+						end if;
+					end loop;
+
 					ix0 := to_integer(lane);
 					ix1 := to_integer(lane or "0001");
 					if end_of_packet = '1' then
 						if zero_packet_flags = '1' then
 							m_axis_tdata_int(j) <= (others => '0');
 						else
-							m_axis_tdata_int(j) <= or_reduce(tdata)(31 downto 0);
+							-- Packet flags word: OR of the flags words of the sublanes this output reads.
+							m_axis_tdata_int(j) <= or_reduce(tdata_active)(31 downto 0);
 						end if;
 					elsif combine_words = '1' and COMBINE_DATA_FLAGS = TRUE then
 						m_axis_tdata_int(j)(15 downto 0) <= tdata(ix0)(15 downto 0);
