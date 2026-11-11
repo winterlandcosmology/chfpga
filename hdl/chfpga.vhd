@@ -760,9 +760,13 @@ architecture impl of chFPGA is
 	constant CT_OUT_BITS_PER_BIN: integer := 4 + 4;
 	constant CT_OUT_WIDTH: integer := FFT_INFO(FFT_TYPE).BINS_PER_WORD * CT_OUT_BITS_PER_BIN * NUMBER_OF_CHANNELIZERS; -- 
 
+	constant CT_OUT_LANES: integer := CT_OUT_WIDTH / 32; -- number of 32-bit corner-turn output lanes (lane 0 at the MSBs of ct_out_tdata)
+
 	signal ct_out_tdata: std_logic_vector(CT_OUT_WIDTH - 1 downto 0); -- TODO: parametrize this, even if this is mostly fixed for the platform
-	signal ct_out_tvalid: std_logic;
-	signal ct_out_tlast: std_logic;
+	signal ct_out_tvalid: std_logic_vector(0 to CT_OUT_LANES - 1); -- one strobe per lane: the level >= 2 corner-turn lanes do not start their packets in step
+	signal ct_out_tlast: std_logic_vector(0 to CT_OUT_LANES - 1);
+	signal uct_out_tvalid: std_logic; -- single strobes of the UCT engine, fanned out to ct_out_tvalid/tlast (UCT only)
+	signal uct_out_tlast: std_logic;
 	attribute shreg_extract of ct_out_tdata, ct_out_tvalid, ct_out_tlast: signal is "no";
 
 	-----------------------
@@ -2060,8 +2064,8 @@ begin
 
                         -- Non-blocking output stream, synchronous to `clk`
                         m_axis_tdata => ct_out_tdata,
-                        m_axis_tvalid => ct_out_tvalid,
-                        m_axis_tlast => ct_out_tlast,
+                        m_axis_tvalid => uct_out_tvalid,
+                        m_axis_tlast => uct_out_tlast,
 
                         axis_clk => ct_clk,
 
@@ -2094,6 +2098,11 @@ begin
                         bsb_rst      => bsb_rst
                     );
 
+                -- The UCT engine produces all output lanes in the same cycle: fan its single
+                -- strobes out to the per-lane strobe vectors used by the output consumers.
+                ct_out_tvalid <= (others => uct_out_tvalid);
+                ct_out_tlast <= (others => uct_out_tlast);
+
             when others =>
                 assert FALSE report "Invalid CT_TYPE" severity FAILURE;
 
@@ -2117,8 +2126,8 @@ begin
 		signal ct_prober_reset: std_logic;
 		signal ct_prober_reset_reg: std_logic;
 		signal ct_prober_in_tdata: std_logic_vector(CT_OUT_WIDTH - 1 downto 0);
-		signal ct_prober_in_tvalid: std_logic;
-		signal ct_prober_in_tlast: std_logic;
+		signal ct_prober_in_tvalid: std_logic_vector(0 to CT_OUT_LANES - 1);
+		signal ct_prober_in_tlast: std_logic_vector(0 to CT_OUT_LANES - 1);
 		attribute shreg_extract of ct_prober_in_tdata, ct_prober_in_tvalid, ct_prober_in_tlast: signal is "no";
 	begin
 
@@ -2130,7 +2139,11 @@ begin
 				ct_prober_reset_reg <= ct_prober_reset;
 
 				ct_prober_in_tdata <= ct_out_tdata;
-				ct_prober_in_tvalid <= ct_out_tvalid and not ct_prober_reset_reg;
+				if ct_prober_reset_reg then
+					ct_prober_in_tvalid <= (others => '0');
+				else
+					ct_prober_in_tvalid <= ct_out_tvalid;
+				end if;
 				ct_prober_in_tlast <= ct_out_tlast;
 			end if; -- clk
 		end process;
@@ -2138,7 +2151,7 @@ begin
 		ct_prober0: entity work.ct_prober
 			generic map (
 				FPGA_SERIES     => FPGA_SERIES,
-				NUMBER_OF_LANES => 8,
+				NUMBER_OF_LANES => CT_OUT_LANES,
 				SIM             => SIM
 			)
 			port map (
@@ -2207,7 +2220,9 @@ begin
 		-- (the bct_engine output flattening reverses lane order), so we slice with
 		-- the reversed lane index; this makes QSFP lane N carry the stream whose
 		-- packet-header STREAM_ID lane nibble is N (same convention as ct_prober).
-		-- All lanes share one TVALID/TLAST. The 244 MHz -> 322 MHz clock-domain
+		-- Each lane carries its own TVALID/TLAST: the CROSSBAR3 bin selectors do not
+		-- start their packets in step (bin selector k lags by k x words-per-bin), so a
+		-- strobe shared from lane 0 would misframe lanes 1..7. The 244 MHz -> 322 MHz clock-domain
 		-- crossing into the 10G core is handled by the independent-clock TX FIFOs
 		-- inside each xge_udp_mac_tx, which were generated for exactly this
 		-- 244/322 write/read configuration.
@@ -2232,8 +2247,8 @@ begin
 					rlane := NUMBER_OF_DATA_LINKS - 1 - i;
 					lsb := 32 * rlane;
 					axis_gpu_tdata(i) <= ct_out_tdata(lsb + 31 downto lsb);
-					axis_gpu_tvalid(i) <= ct_out_tvalid and not gpu_reset;
-					axis_gpu_tlast(i) <= ct_out_tlast;
+					axis_gpu_tvalid(i) <= ct_out_tvalid(i) and not gpu_reset; -- each lane's own strobes (strobe vectors are indexed by lane number)
+					axis_gpu_tlast(i) <= ct_out_tlast(i);
 				end loop;
 			end if;
 		end process;
@@ -2330,8 +2345,8 @@ begin
 				port map (
 					-- input data bus
 					s_axis_in_tdata => ct_out_tdata,
-						s_axis_in_tvalid => ct_out_tvalid,
-						s_axis_in_tlast => ct_out_tlast,
+						s_axis_in_tvalid => ct_out_tvalid(0), -- upack packs all lanes as one word: it assumes lane-aligned output (UCT / hardwired crossbar), so lane 0's strobes stand for all
+						s_axis_in_tlast => ct_out_tlast(0),
 
 						-- Output data bus
 						m_axis_out_tdata => uct_tdata,
@@ -2548,8 +2563,8 @@ begin
 					-- Pipeline correlator input
 					if rising_edge(ct_clk) then
 						corr_in_tdata  <= ct_out_tdata;
-						corr_in_tlast  <= ct_out_tlast;
-						corr_in_tvalid <= ct_out_tvalid;
+						corr_in_tlast  <= ct_out_tlast(0); -- hardwired (level-1) crossbar: all lanes carry identical strobes
+						corr_in_tvalid <= ct_out_tvalid(0);
 					end if; -- clk
 				end process corr_pipe;
 

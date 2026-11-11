@@ -66,9 +66,8 @@ entity bct_engine is
 		-- Derived parameters
 		INPUT_WORD_WIDTH: integer    := NUMBER_OF_INPUT_LANES * INPUT_LANE_WIDTH;
 		BITS_PER_OUTPUT_BIN: integer := BITS_PER_INPUT_BIN / 2; -- BCT outputs 4+4 bits data
-		--    OUTPUT_LANE_WIDTH: integer           := OUTPUT_WORD_WIDTH/;
-		--    NUMBER_OF_OUTPUT_LANES: integer      := 8; -- Number of output streams
 		OUTPUT_WORD_WIDTH: integer           := INPUT_WORD_WIDTH * BITS_PER_OUTPUT_BIN / BITS_PER_INPUT_BIN;  -- The CT preserves the data rate unless bits/bin is modified
+		NUMBER_OF_OUTPUT_LANES: integer      := OUTPUT_WORD_WIDTH / 32; -- Number of 32-bit output streams (8) - Do not override
 		NUMBER_OF_LINKS: integer             := LINK_TO_QUAD_MAP'LENGTH; --  Number of physical data links (GTYs) - Do not override
 		NUMBER_OF_REFCLK: integer            := sel(QUAD_TO_REFCLK_MAP'LENGTH > 0, max(QUAD_TO_REFCLK_MAP) + 1, 0); -- Number of reference clocks - Do not override
 		BP_LINK_SPEED: integer               := 0 -- 0: 7.5 Gb/s (txclk_out=244 MHz), 1: 10 Gb/s (txclk_out=322 MHz)
@@ -81,15 +80,14 @@ entity bct_engine is
 		s_axis_tvalid: in std_logic;
 		s_axis_tlast: in std_logic;
 
-		-- Non-blocking output stream, synchronous to `clk`
-		
-		m_axis_tvalid: out std_logic;
+		-- Non-blocking output stream, synchronous to `clk`.
+		-- NUMBER_OF_OUTPUT_LANES 32-bit lanes packed in `m_axis_tdata` with lane 0 at the MSBs.
+		-- Every lane carries its own TVALID/TLAST (vector index = lane number): with CT_LEVEL >= 2
+		-- the lanes come from independent bin selectors that start their packets at different
+		-- times, so a single strobe shared by all lanes would misframe lanes 1..N-1 downstream.
+		m_axis_tvalid: out slv(0 to NUMBER_OF_OUTPUT_LANES - 1);
 		m_axis_tdata: out slv(OUTPUT_WORD_WIDTH - 1 downto 0);
-		m_axis_tlast: out std_logic;
-
-		--     m_axis_tvalid: out slv(0 to NUMBER_OF_OUTPUT_LANES-1);
-		--     m_axis_tdata: out slv_array(0 to NUMBER_OF_OUTPUT_LANES-1);
-		--     m_axis_tlast: out slv(0 to NUMBER_OF_OUTPUT_LANES-1);
+		m_axis_tlast: out slv(0 to NUMBER_OF_OUTPUT_LANES - 1);
 
 
 		-- Backplane data shuffle
@@ -381,7 +379,7 @@ begin
 			if rising_edge(clk) then
 				-- count CT1 input and output words
 				in_frame_ctr  <= in_frame_ctr + 1 when s_axis_tvalid and s_axis_tlast;
-				out_frame_ctr <= out_frame_ctr + 1 when m_axis_tvalid and m_axis_tlast;
+				out_frame_ctr <= out_frame_ctr + 1 when m_axis_tvalid(0) and m_axis_tlast(0); -- all lanes carry identical strobes in the hardwired crossbar
 
 				-- pipeline channelizer data
 				-- This CT engine assumes that the channelizer data is aligned, i.e. all lanes share a common tvalid and tlast
@@ -409,8 +407,9 @@ begin
 
 				end loop;
 
-				m_axis_tvalid <= cb1_in_tvalid when not cb1_in_rst else '0';
-				m_axis_tlast <= cb1_in_tlast;
+				-- The hardwired crossbar produces all lanes in the same cycle: identical strobes on every lane.
+				m_axis_tvalid <= (others => cb1_in_tvalid and not cb1_in_rst);
+				m_axis_tlast <= (others => cb1_in_tlast);
 			--        resetdone <= not cb1_in_rst;
 			end if; -- clk
 		end process;
@@ -553,6 +552,7 @@ begin
 	begin
 
 		assert CB1_INPUT_LANE_WIDTH = 32 report "Crossbar1 supports only 32-bit inputs" severity failure;
+		assert NUMBER_OF_CB3_OUTPUT_LANES = NUMBER_OF_OUTPUT_LANES report "The number of CB3 output lanes must match the number of 32-bit lanes in the output word" severity failure;
 
 		bsb_rst_proc: process(all) begin
 			if rising_edge(bsb_clk) then
@@ -819,15 +819,17 @@ begin
 				cb3_in_rst <= bp_shuffle_out_rst;
 				cb3_out_rst <= cb3_in_rst;
 
-				-- Assign outputs
+				-- Assign outputs: pack the lanes (lane 0 at the MSBs) and pass each lane's own
+				-- strobes. The CB3 bin selectors start their packets at different times (bin
+				-- selector k waits for its first selected bin), so lane 0's strobes must not be
+				-- used for the other lanes.
 				for lane in 0 to NUMBER_OF_CB3_OUTPUT_LANES - 1 loop -- 0 to 7
                     rlane := NUMBER_OF_CB3_OUTPUT_LANES - 1 - lane;
                     lsb := CB3_OUTPUT_LANE_WIDTH * rlane;
 					m_axis_tdata(lsb + CB3_OUTPUT_LANE_WIDTH - 1 downto lsb) <= cb3_out_tdata(lane);
+					m_axis_tvalid(lane) <= cb3_out_tvalid(lane) and not cb3_out_rst;
+					m_axis_tlast(lane) <= cb3_out_tlast(lane);
 				end loop;
-
-				m_axis_tvalid <= cb3_out_tvalid(0) and not cb3_out_rst;
-				m_axis_tlast <= cb3_out_tlast(0);
 			end if; -- clk
 		end process;
 

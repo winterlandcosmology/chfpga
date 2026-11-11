@@ -130,8 +130,8 @@ entity ct_prober is
 		-- Lane 0 is at the MSBs of in_tdata (bct_engine output lane reversal).
 
 		in_tdata  : in std_logic_vector(NUMBER_OF_LANES * LANE_WIDTH - 1 downto 0);
-		in_tvalid : in std_logic; -- shared by all lanes
-		in_tlast  : in std_logic; -- shared by all lanes; delimits CT packets
+		in_tvalid : in std_logic_vector(0 to NUMBER_OF_LANES - 1); -- one per lane (index = lane number); the selected lane's strobe is used
+		in_tlast  : in std_logic_vector(0 to NUMBER_OF_LANES - 1); -- one per lane; delimits the CT packets of that lane
 		in_clk    : in std_logic; -- corner-turn clock; STOPS during corner-turn resets
 		in_reset  : in std_logic;
 
@@ -418,6 +418,8 @@ begin
 			variable lane: integer range 0 to NUMBER_OF_LANES - 1;
 			variable rlane: integer range 0 to NUMBER_OF_LANES - 1;
 			variable is_first_frame_of_burst: boolean;
+			variable sel_tvalid: std_logic; -- strobes of the selected lane
+			variable sel_tlast: std_logic;
 
 		begin
 			if rising_edge(in_clk) then
@@ -426,11 +428,21 @@ begin
 				-- Track the FIFO reset-busy release (see wr_rst_busy_dly declaration)
 				wr_rst_busy_dly <= wr_rst_busy_dly(wr_rst_busy_dly'HIGH - 1 downto 0) & data_fifo_wr_rst_busy;
 
+				-- Select the lane to capture. Lane 0 is at the MSBs of in_tdata (the bct_engine
+				-- output flattening reverses lane order), so the data slice uses the reversed lane
+				-- number, while the strobe vectors are indexed by lane number directly. Every lane
+				-- carries its own TVALID/TLAST (the bin selectors do not start their packets in
+				-- step), so all packet framing below uses the selected lane's strobes.
+				lane := to_integer(unsigned(current_lane));
+				rlane := NUMBER_OF_LANES - 1 - lane;
+				sel_tvalid := in_tvalid(lane);
+				sel_tlast := in_tlast(lane);
+
 				-- -------------------------------------------
 				-- Packet and period counter
 				-- -------------------------------------------
-				-- Counts incoming CT packets (TLASTs) and the primary period.
-				if in_tvalid and in_tlast then
+				-- Counts incoming CT packets (TLASTs) of the selected lane and the primary period.
+				if sel_tvalid and sel_tlast then
 					frame_ctr <= frame_ctr + 1; -- always count the 48-bit packet number. We will put this in the header.
 					primary_period_ctr <= primary_period_ctr + 1;
 					if not offset_done then
@@ -446,17 +458,13 @@ begin
 				end if; -- last word
 
 				-- Register the FIFO input data bus from the selected lane. This is in phase
-				-- with data_fifo_wr_en and burst_capture. Lane 0 is at the MSBs of in_tdata
-				-- (the bct_engine output flattening reverses lane order), so we index the
-				-- slice with the reversed lane number.
-				lane := to_integer(unsigned(current_lane));
-				rlane := NUMBER_OF_LANES - 1 - lane;
-				data_fifo_din(32) <= in_tlast;
+				-- with data_fifo_wr_en and burst_capture.
+				data_fifo_din(32) <= sel_tlast;
 				data_fifo_din(31 downto 0) <= in_tdata(LANE_WIDTH * rlane + LANE_WIDTH - 1 downto LANE_WIDTH * rlane);
 
 				data_fifo_wr_en <= '0'; -- don't write data to FIFO unless overriden below
 
-				if in_tvalid then
+				if sel_tvalid then
 					-- Determine if this is the first packet of a burst to be captured. This is
 					-- true when 1) the capture offset is elapsed and 2) all the bits in the
 					-- sub-period range are zero, which always includes the first packet of the
@@ -465,7 +473,7 @@ begin
 
 					if burst_capture then
 						data_fifo_wr_en <= '1'; -- continue writing delayed data
-						if in_tlast then
+						if sel_tlast then
 							burst_ctr <= burst_ctr + 1;
 							if burst_ctr = burst_length then -- This was the last word of the last packet of the burst
 								burst_capture <= '0'; -- stop burst
