@@ -385,6 +385,7 @@ begin
 
 		signal burst_ctr: unsigned(burst_length'RANGE) := (others => '0'); -- Packet number being captured within a burst
 		signal burst_capture: std_logic; -- high while a burst capture is in progress
+		signal sel_tfirst: std_logic := '0'; -- '1' when the next valid word of the selected lane is the first word of a packet (previous valid word carried TLAST). Bursts start only on such a word.
 
 		-- Delayed copies of the FIFO write-side reset-busy flag. The FIFO36E1 primitives
 		-- require WREN to stay low for at least two WRCLK cycles after their reset deasserts;
@@ -438,6 +439,12 @@ begin
 				sel_tvalid := in_tvalid(lane);
 				sel_tlast := in_tlast(lane);
 
+				-- Track packet boundaries of the selected lane: after a TLAST word, the next
+				-- valid word is a first word.
+				if sel_tvalid then
+					sel_tfirst <= sel_tlast;
+				end if;
+
 				-- -------------------------------------------
 				-- Packet and period counter
 				-- -------------------------------------------
@@ -480,7 +487,11 @@ begin
 								readout_req <= not readout_req; -- toggle bit to signal readout should start now
 							end if; -- if last packet
 						end if; -- tlast
-					elsif is_first_frame_of_burst and capture_en = '1' and data_fifo_wr_rst_busy = '0' and all_zeros(wr_rst_busy_dly) then
+					elsif is_first_frame_of_burst and sel_tfirst = '1' and capture_en = '1' and data_fifo_wr_rst_busy = '0' and all_zeros(wr_rst_busy_dly) then
+						-- sel_tfirst guarantees the burst starts on the first word of a packet. Without it,
+						-- a burst could start on the TLAST word of the preceding packet (e.g. when the previous
+						-- readout completed on that very cycle), capturing that trailer as word 0 and losing
+						-- the real trailer at the end (observed on the bench as a 1-in-30 one-word slip).
 						if readout_acq_resync = readout_req then -- if previous readout is completed
 							burst_ctr <= (others => '0');
 							burst_capture <= '1';
@@ -493,6 +504,9 @@ begin
 					else
 						-- change lane only if we are between bursts
 						current_lane <= new_lane;
+						if current_lane /= new_lane then
+							sel_tfirst <= '0'; -- the new lane's packet phase is unknown: wait for its next TLAST
+						end if;
 					end if; -- burst_capture or first_frame_of_burst
 				end if; -- tvalid
 
@@ -501,6 +515,7 @@ begin
 					burst_capture <= '0';
 					data_fifo_wr_en <= '0';
 					current_lane <= new_lane;
+					sel_tfirst <= '0'; -- wait for a packet boundary before the first burst
 					frame_ctr <= (others => '0'); -- needed
 					primary_period_ctr <= (others => '0'); -- needed.
 					offset_done <= '1' when capture_offset = 0 else '0';
