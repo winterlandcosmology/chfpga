@@ -273,8 +273,8 @@ architecture impl of chfpga_crs is
 	-- fails its DRC.
 	-- "None" tells the tools not to implement an IO port. "OBUF" implements the IO port.
 	--  In the case of "OBUF", it looks like the output buffer is adapted to the type of output such as a transceiver output etc.
-	attribute io_buffer_type of qsfp_txp, qsfp_txn: signal is sel(DATA_LINK_TYPE = UPACK_CGE, "OBUF", "NONE");
-	attribute io_buffer_type of clk156_p, clk156_n: signal is sel(DATA_LINK_TYPE = UPACK_CGE, "IBUF", "NONE");
+	attribute io_buffer_type of qsfp_txp, qsfp_txn: signal is sel(DATA_LINK_TYPE = UPACK_CGE or DATA_LINK_TYPE = RAW_CGE, "OBUF", "NONE");
+	attribute io_buffer_type of clk156_p, clk156_n: signal is sel(DATA_LINK_TYPE = UPACK_CGE or DATA_LINK_TYPE = RAW_CGE, "IBUF", "NONE");
 	attribute io_buffer_type of bp_shuffle_tx_p, bp_shuffle_tx_n: signal is sel(CT_LEVEL > 1, "OBUF", "NONE");
 
 	-- BSB & CAP AXIS clock (100 MHz)
