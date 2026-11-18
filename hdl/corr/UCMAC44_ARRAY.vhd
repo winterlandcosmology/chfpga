@@ -165,6 +165,12 @@ architecture impl of UCMAC44_ARRAY is
 	constant BYTES_PER_PRODUCT: integer := 5; -- (18+18) bits + 4 extra bits = 40 bits = 5 bytes
 	--  constant NBINS_TO_READOUT: integer := 2048; -- maximum number of bins that will be read and sent
 	constant LOG2_NCORR: integer := integer_log2(NCORR);
+	-- RAM address layout: [bank bit][product index]. The bank bit must sit just above the
+	-- product index so that both banks fit in the RAM depth: with the bank bit fixed at bit 11,
+	-- any NPROD < 2048 (e.g. 512 on ICE corr16) maps bank 1 outside the 2*NPROD-word memory,
+	-- the RAM ignores the upper address bits, and both banks alias onto the same words.
+	constant PROD_ADDR_WIDTH: integer := width(NPROD); -- 11 for NPROD=2048, 9 for NPROD=512
+	constant RAM_ADDR_WIDTH: integer := PROD_ADDR_WIDTH + 1; -- product index + bank bit
 
 	attribute keep_hierarchy of impl: architecture is "YES";
 	-- attribute RLOC_ORIGIN of Behavioral: architecture is ORIGIN;
@@ -173,8 +179,8 @@ architecture impl of UCMAC44_ARRAY is
 
 	signal ram_dout: slv_array(0 to NCMAC - 1)(35 downto 0);
 	signal ram_din: slv_array(0 to NCMAC - 1)(35 downto 0);
-	signal ram_wr_addr: std_logic_vector(11 downto 0); -- 12 bits = 4096 words
-	signal ram_rd_addr: std_logic_vector(11 downto 0); -- 12 bits = 4096 words
+	signal ram_wr_addr: std_logic_vector(RAM_ADDR_WIDTH - 1 downto 0); -- bank & product index (12 bits = 4096 words for NPROD=2048)
+	signal ram_rd_addr: std_logic_vector(RAM_ADDR_WIDTH - 1 downto 0); -- bank & product index
 	signal ram_wr_en: std_logic := '0';
 	signal ram_rd_en: std_logic := '1';
 
@@ -208,7 +214,8 @@ begin
 
 		--    ram_rd_addr <= (not acc_bank1) & std_logic_vector(ro_word_ctr1) when rd_word_ctr1=READOUT_BIN else
 		--                   acc_bank1 & std_logic_vector(rd_word_ctr1);
-		ram_wr_addr <= acc_bank5 & std_logic_vector(wr_word_ctr5);
+		assert NPROD <= 2 ** rd_word_ctr1'LENGTH report "UCMAC44_ARRAY: NPROD exceeds the word counter range" severity failure;
+		ram_wr_addr <= acc_bank5 & std_logic_vector(wr_word_ctr5(PROD_ADDR_WIDTH - 1 downto 0));
 
 		wr_proc: process(all)
 
@@ -252,8 +259,8 @@ begin
 						end if; -- last frame of integ_period
 					end if; -- tlast
 					-- set the next RAM address to read
-					ram_rd_addr <= (not next_acc_bank) & std_logic_vector(ro_word_ctr1) when next_rd_word_ctr = READOUT_BIN else
-	               next_acc_bank & std_logic_vector(next_rd_word_ctr);
+					ram_rd_addr <= (not next_acc_bank) & std_logic_vector(ro_word_ctr1(PROD_ADDR_WIDTH - 1 downto 0)) when next_rd_word_ctr = READOUT_BIN else
+	               next_acc_bank & std_logic_vector(next_rd_word_ctr(PROD_ADDR_WIDTH - 1 downto 0));
 					acc_bank1 <= next_acc_bank;
 					rd_word_ctr1 <= next_rd_word_ctr;
 				end if; -- tvalid
@@ -914,13 +921,13 @@ begin
 			generic map (
 				MEMORY_PRIMITIVE => MEM_TYPE,      -- force the use of UltraRAM ("ultra") or Block RAM ("block")
 				-- write bus A
-				ADDR_WIDTH_A       => 12,               -- 4k (12 bits) per URAM
+				ADDR_WIDTH_A       => RAM_ADDR_WIDTH,   -- bank & product index; 12 bits (4k words, one URAM) for NPROD=2048
 				WRITE_DATA_WIDTH_A => 72,        -- 2 x (18+18) bits wide write bus
 				BYTE_WRITE_WIDTH_A => 72,          -- We use 8-bit-wide-byte-enabled write, i.e. we have 8 byte enable bits
 				-- Read bus B
-				ADDR_WIDTH_B      => 12,               -- same
+				ADDR_WIDTH_B      => RAM_ADDR_WIDTH,   -- same
 				READ_DATA_WIDTH_B => 72,         -- 2 x (18+18) bits wide read bus
-				MEMORY_SIZE       => 72 * 2 * NPROD,         -- 72-bit word * 4096 words = 1 x URAM288 or 8 x RAMB36 (72 x 512 each)
+				MEMORY_SIZE       => 72 * 2 ** RAM_ADDR_WIDTH, -- two banks; 72-bit word * 4096 words = 1 x URAM288 or 8 x RAMB36 (72 x 512 each) for NPROD=2048
 				READ_LATENCY_B    => 2,     -- Needs to be >= of cascade height to allow registering. Synthesis ask for more than 4 to have full pipelining (4 is partial).
 				SIM_ASSERT_CHK    => 1,             -- DECIMAL; 0=disable simulation messages, 1=enable simulation messages
 				-- USE_EMBEDDED_CONSTRAINT => 0,    -- DECIMAL
