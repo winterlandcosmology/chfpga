@@ -13,6 +13,11 @@ concise.
 - Store durable repo knowledge in this file, not in custom side files.
 - The user compiles bitstreams themselves; prepare sources and verify, then
   hand off.
+- The repo lives at git@github.com:winterlandcosmology/chfpga.git (moved from
+  bitbucket.org/winterlandcosmology/chfpgalite in Nov 2026). The move rewrote
+  history (only `hooks/README` dropped), so most commit hashes changed;
+  hashes quoted from before the move may be stale — look the commit up by
+  subject.
 
 ## Build environment
 
@@ -103,7 +108,7 @@ concise.
 - BSB address hierarchy: top router bits 18:16, bct_engine router bits 15:14,
   crossbar routers bits 13:9 (5-bit port index, 9-bit space per port,
   matching pychfpga's `port << 9`). The crossbar ADDRESS_MASKs were fixed to
-  this layout in 98bc0a73 — keep any new sub-router consistent with it.
+  this layout in 22d993e8 — keep any new sub-router consistent with it.
 - Several corner-turn status registers are declared but never driven in the
   RTL and always read zero: chan_crossbar's INPUT_FRAME_CTR/ALIGN_FRAME_CTR
   and lane monitor. Do not use them as dataflow indicators; the live
@@ -175,8 +180,8 @@ concise.
   `bct_engine`, `chfpga.vhd` (GPU links, ct_prober, correlator feed) and
   `ct_prober` carry one TVALID/TLAST per lane (vector index = lane number;
   lane 0 at the MSBs of the packed data word). The 2017 design did this
-  (7ea1889f); e51b2cf5 (2025-07-02) collapsed the engine output to lane 0's
-  strobe while the GPU path was disconnected, and 4492f530 (2026-08-11) fanned
+  (7ea1889f); 270a1b6a (2025-07-02) collapsed the engine output to lane 0's
+  strobe while the GPU path was disconnected, and 037447ed (2026-08-11) fanned
   that single strobe out to the 10G links. Effect on shuffle128/256/512 (any
   mode with CROSSBAR3 bin selectors active): lane k was sent with k x
   words-per-bin copies of header word 0 in front (8 per lane in shuffle256, 16
