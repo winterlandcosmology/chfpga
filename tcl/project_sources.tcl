@@ -210,7 +210,10 @@ set crs_bd_name "zynq_tcpipe_crs"
 
 set crs_ooc_ip_files $fft_type_chord
 
-set crs_corr8_ip_files []
+# corr8 has a 100G link for the raw ADC streamer (DATA_LINK_TYPE = RAW_CGE)
+set crs_corr8_ip_files [list \
+ "cmac_usplus_1/cmac_usplus_1.xci" \
+]
 
 # For corr32, 64, which need the GTYs for corner turning (paths relative to ${crs_platform_dir}/ip_cores)
 set crs_corr_ip_files [list \
@@ -247,6 +250,11 @@ set crs_corr_hdl_files [concat $crs_hdl_base_files [list \
  "corr/UCORR44.vhd" \
  "corr/UCORR44_ARRAY.vhd" \
  ]]
+
+set crs_corr8_hdl_files [concat $crs_corr_hdl_files [list \
+  "data_links/100GE_UDP_MAC/rawpack.vhd" \
+  "data_links/100GE_UDP_MAC/cge.vhd" \
+  ]]
 
 set crs_ct_hdl_files [concat $crs_hdl_base_files [list \
   "ct/upack.vhd" \

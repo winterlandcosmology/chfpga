@@ -29,7 +29,7 @@ package chfpga_config is
 
     -- 10/100G Ethernet Real-time data offload links configuration
 
-    constant CONFIG_DATA_LINK_TYPE: data_link_type_enum := NONE;
+    constant CONFIG_DATA_LINK_TYPE: data_link_type_enum := RAW_CGE; -- 100G QSFP link carrying the raw ADC streamer (rawpack)
 
 
 
