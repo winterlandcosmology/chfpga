@@ -215,3 +215,40 @@ concise.
 - Side finding, not acted on: `xglink_array` hard-codes `EXAMPLE_SIMULATION => 1`
   and `SIM => TRUE` into the synthesized `xglink_core`, so the RX startup FSM
   skips the equalizer adaptation wait in hardware.
+
+## Correlator (UCORR44 / UCMAC44_ARRAY, Nov 2026 investigation)
+
+- **ICE corr16 bank aliasing** (fixed in d960bb01, bench-validated): UCMAC44_ARRAY put
+  the accumulation/readout bank bit at RAM address bit 11 while sizing the XPM
+  RAM as `2*NPROD` words. ICE corr16 has NPROD=512 (1024-word RAM), so bits
+  11:10 were dropped and both banks shared the same 512 words: the readout read
+  the accumulator restarting after the bank switch (bin k = f*|x|^2, f = frame
+  at which bin k was read, independent of N), and the READOUT_BIN word
+  self-accumulated after the readout finished (the only bin scaling with N).
+  Every UCORR44 ICE corr16 bitstream had it; the build logs show
+  `[XPM_MEMORY 30-16]/[30-19] addressable range exceeds the memory size`. The
+  bank bit now sits at bit `width(NPROD)` and the RAM holds `2**(width+1)`
+  words: same BRAM count, and bit-identical for NPROD=2048 (CRS corr8/32/64,
+  the only other UCORR44 users). `no_accum=1` hides the bug. Treat any
+  `XPM_MEMORY 30-16/30-19` synthesis warning as an error.
+- After the fix the READOUT_BIN (bin 0 of each core) carries no valid data by
+  design (its read slot is stolen for the readout); hosts must mask it.
+- ICE readout timing: a 690-byte packet (10 + 136*5) exceeds the 512-clock
+  frame, so a core captures at most one bin every 2 frames, and core 1 starts
+  only after core 0 has finished (daisy chain). A full two-core readout takes
+  >= 2048 frames at line rate (~3100-3300 at the bench's output rate), so
+  integration periods below ~4096 overrun.
+- Not fixed: product bits 39:36 are always zero (no saturation flags; saturation
+  shows only as the 18-bit clamp), and STREAM_ID = (corr_id + CORR_NUMBER)<<11
+  | bin collides across boards when corr_id = slot-1 (core 1 of slot k equals
+  core 0 of slot k+1).
+- Testbenches (xsim, VHDL-2008 external names): `ucorr44_ice_readout_testbench`
+  (`run_ucorr44_ice_readout.sh`; one core, decodes packets and checks N|x|^2 and
+  the aliasing model, ends with RESULT: PASS/FAIL; RAM_AW defaults to the fixed
+  RTL's 10, use 12 for pre-fix RTL; NCHAN=4 gives a reduced model ~15x faster
+  than NCHAN=16, which runs ~1 frame/s) and
+  `ucorr44_ice_array_testbench` (`run_ucorr44_ice_array.sh`; two cores, output
+  FIFO back-pressure; `-e` prints the elaborated generics). xsim 2022.2 does
+  not evaluate XPM's per-access out-of-range assertion, does not support
+  external names for constants, and needs `glbl` for xpm_cdc. Run parallel
+  elaborations in separate build directories.
