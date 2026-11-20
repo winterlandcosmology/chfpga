@@ -250,6 +250,7 @@ set crs_corr_hdl_files [concat $crs_hdl_base_files [list \
 
 set crs_ct_hdl_files [concat $crs_hdl_base_files [list \
   "ct/upack.vhd" \
+  "data_links/100GE_UDP_MAC/rawpack.vhd" \
   "data_links/100GE_UDP_MAC/cge.vhd"\
   ]]
 
@@ -277,6 +278,7 @@ set zcu111_hdl_base_files [concat $hdl_base_files [list \
 
 set zcu111_ct_hdl_files [concat $zcu111_hdl_base_files [list \
   "ct/upack.vhd" \
+  "data_links/100GE_UDP_MAC/rawpack.vhd" \
   "data_links/100GE_UDP_MAC/cge.vhd" \
  ]]
 

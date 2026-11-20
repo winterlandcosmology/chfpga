@@ -588,6 +588,7 @@ architecture impl of chFPGA is
 	constant GPU_LINK_BASE_PORT: integer    := 3; -- Top level address for the GPU link subsystem
 	constant CORR_BASE_PORT: integer        := 4; -- Top level address for the correlator subsystem (exclusive with the 2nd and 3rd crossbar)
 	constant UPACK_BASE_PORT: integer       := 5; -- Top level address of the CT-Engine backplane shuffle subsystem.
+	constant RAWPACK_BASE_PORT: integer     := 6; -- Top level address of the raw ADC streamer (only with the 100G link).
 	constant UCAP_BASE_PORT: integer        := 7; -- Top-level address for the UltraRAM-based data capture engine.
 	constant NUMBER_OF_PORTS: integer       := 8; -- Total number of top-level subsystems to be addressed.
 
@@ -710,6 +711,13 @@ architecture impl of chFPGA is
 	-- Intermediary buses used to split out the top router outputs and avoid a simulator bug when indexing record arrays as an actual parameter of an instance
 
 	-- Slow data capture bus (PROBER & CORR output)
+	-- Copy of the capture bus that feeds UCAP, for the raw ADC streamer
+	signal raw_tdata: slv_array(0 to max(NUMBER_OF_ADCS, NUMBER_OF_CHANNELIZERS) - 1)(CHAN_CAPTURE_INFO(CAPTURE_TYPE).INPUT_WIDTH - 1 downto 0);
+	signal raw_tvalid: std_logic_vector(0 to CHAN_CAPTURE_INFO(CAPTURE_TYPE).NUMBER_OF_SOURCES - 1);
+	signal raw_tlast: std_logic_vector(0 to CHAN_CAPTURE_INFO(CAPTURE_TYPE).NUMBER_OF_SOURCES - 1);
+	signal raw_source: std_logic_vector(0 to max(NUMBER_OF_ADCS, NUMBER_OF_CHANNELIZERS) - 1);
+	signal raw_rst: std_logic;
+
 	signal cap_data: slv_array(0 to NUMBER_OF_PROBES - 1)(7 downto 0);
 	signal cap_valid: std_logic_vector(0 to NUMBER_OF_PROBES - 1);
 	signal cap_last: std_logic_vector(0 to NUMBER_OF_PROBES - 1);
@@ -1214,7 +1222,7 @@ begin
 	-- |  3 | 0x30000  | XGE or CGE                         | Real-time data offload Links, 10G or 100G Ethernet |
 	-- |  4 | 0x40000  | CORR44 or UCORR44                  | X-Engine/Correlator subsystem |
 	-- |  5 | 0x50000  | UPACK                              | Frame aggregator and packetizer (Ultrascale+ only) |
-	-- |  6 | 0x60000  | (unused)                           |             |
+	-- |  6 | 0x60000  | RAWPACK (raw ADC streamer, 100G link only) | `rawpack`   |
 	-- |  7 | 0x70000  | UCAP                               | UltraRAM-based data capture engine (Ultrascale+ only) |
 
 	top_router_blk: block
@@ -1876,7 +1884,14 @@ begin
 			m_axis_ucap_bsb_tdata => top_router_bsb_rply_tdata(UCAP_BASE_PORT),
 			m_axis_ucap_bsb_tvalid => top_router_bsb_rply_tvalid(UCAP_BASE_PORT),
 			m_axis_ucap_bsb_tlast => top_router_bsb_rply_tlast(UCAP_BASE_PORT),
-			m_axis_ucap_bsb_tready => top_router_bsb_rply_tready(UCAP_BASE_PORT)
+			m_axis_ucap_bsb_tready => top_router_bsb_rply_tready(UCAP_BASE_PORT),
+
+			-- Copy of the UCAP capture bus for the raw ADC streamer
+			m_axis_raw_tdata => raw_tdata,
+			m_axis_raw_tvalid => raw_tvalid,
+			m_axis_raw_tlast => raw_tlast,
+			m_axis_raw_source => raw_source,
+			m_axis_raw_rst => raw_rst
 		);
 
 
@@ -2198,6 +2213,11 @@ begin
 				signal uct_tvalid: std_logic;
 				signal uct_tlast: std_logic;
 
+				-- Data bus into the 100G interface: UPACK data or raw ADC samples
+				signal cge_in_tdata: std_logic_vector(255 downto 0);
+				signal cge_in_tvalid: std_logic;
+				signal cge_in_tlast: std_logic;
+
 			begin
 				-- Pipeline the 2nd crossbar output (non-blocking AXI-Streaming bus) to the input to the GPU link blocks to facilitate routing
 				cge_pipe_proc: process(all) begin
@@ -2251,6 +2271,44 @@ begin
 						bsb_rst => gpu_bsb_rst_reg
 					);
 
+				-- RAWPACK sits between UPACK and CGE. When enabled, it replaces the UPACK stream by the raw
+				-- samples of two channels taken from the UCAP capture bus (which is on the same clock, since
+				-- ct_clk = adc_clk in the configurations that have the 100G link). Otherwise it is transparent.
+				rawpack0: entity work.rawpack
+					generic map (
+						NUMBER_OF_CHANNELS => raw_tdata'length,
+						NUMBER_OF_SOURCES => raw_tvalid'length
+					)
+					port map (
+						s_axis_raw_tdata  => raw_tdata,
+						s_axis_raw_tvalid => raw_tvalid,
+						s_axis_raw_tlast  => raw_tlast,
+						source_sel_in     => raw_source,
+						raw_rst           => raw_rst,
+
+						s_axis_in_tdata  => uct_tdata,
+						s_axis_in_tvalid => uct_tvalid,
+						s_axis_in_tlast  => uct_tlast,
+
+						m_axis_out_tdata  => cge_in_tdata,
+						m_axis_out_tvalid => cge_in_tvalid,
+						m_axis_out_tlast  => cge_in_tlast,
+
+						clk => ct_clk,
+						rst => cge_reset,
+
+						s_axis_bsb_tdata => top_router_bsb_cmd_tdata(RAWPACK_BASE_PORT),
+						s_axis_bsb_tvalid => top_router_bsb_cmd_tvalid(RAWPACK_BASE_PORT),
+						s_axis_bsb_tlast => top_router_bsb_cmd_tlast(RAWPACK_BASE_PORT),
+						s_axis_bsb_tready => top_router_bsb_cmd_tready(RAWPACK_BASE_PORT),
+						m_axis_bsb_tdata => top_router_bsb_rply_tdata(RAWPACK_BASE_PORT),
+						m_axis_bsb_tvalid => top_router_bsb_rply_tvalid(RAWPACK_BASE_PORT),
+						m_axis_bsb_tlast => top_router_bsb_rply_tlast(RAWPACK_BASE_PORT),
+						m_axis_bsb_tready => top_router_bsb_rply_tready(RAWPACK_BASE_PORT),
+						bsb_clk => bsb_clk,
+						bsb_rst => gpu_bsb_rst_reg
+					);
+
 				-- Use COMPONENT instantiation if this is synthesized as an out-of-context module
 				cge0: entity work.cge
 					port map (
@@ -2264,9 +2322,9 @@ begin
 						clk322_out    => cge_clk322, -- 322 MHz generated by the core to clock all user interface signals.
 
 						-- input data interface
-						s_axis_tx_tdata  => uct_tdata,
-						s_axis_tx_tvalid => uct_tvalid,
-						s_axis_tx_tlast  => uct_tlast,
+						s_axis_tx_tdata  => cge_in_tdata,
+						s_axis_tx_tvalid => cge_in_tvalid,
+						s_axis_tx_tlast  => cge_in_tlast,
 						clk => ct_clk,
 
 
