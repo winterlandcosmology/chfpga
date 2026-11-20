@@ -1,7 +1,7 @@
 ``corr8`` configuration (*chfpga_crs_corr8_config.vhd*)
 =======================================================
 
-8-channel F-Engine, UCT corner-turn (single-board), and 8-input :math:`N^2` correlator. No real-time offload.
+8-channel F-Engine, UCT corner-turn (single-board), and 8-input :math:`N^2` correlator. The 100G QSFP link carries the raw ADC streamer only.
 
 Configuration parameters
 -------------------------
@@ -18,7 +18,7 @@ Configuration parameters
 - :ref:`CONFIG_CT_LANE_TO_LINK_MAP <config_ct_lane_to_link_map>` — (0 => -1); bypass lane
 - :ref:`CONFIG_CORR_TYPE <config_corr_type>` — UCORR44; 8-input correlator
 - :ref:`CONFIG_CORR_READOUT_BINS <config_corr_readout_bins>` — (0, 1, 2, 3); bins for readout
-- :ref:`CONFIG_DATA_LINK_TYPE <config_data_link_type>` — NONE; no real-time offload
+- :ref:`CONFIG_DATA_LINK_TYPE <config_data_link_type>` — RAW_CGE; 100G link with the raw ADC streamer (``rawpack``), no ``upack``
 
 Package definition
 ------------------
@@ -31,4 +31,4 @@ Implementation details
 Principle of operations
 -----------------------
 
-This package defines compile-time constants for a self-contained, single-board CRS 8-input correlator. It enables 8 CHORD-format F-Engine channelizers with URAM-based centralized capture, a single-board UCT corner-turn (``CT_LEVEL = 1``) with a bypass lane and no backplane data exchange, and an 8-input UCORR44 correlator that reads out four spectral bins locally. No real-time data offload is active.
+This package defines compile-time constants for a self-contained, single-board CRS 8-input correlator. It enables 8 CHORD-format F-Engine channelizers with URAM-based centralized capture, a single-board UCT corner-turn (``CT_LEVEL = 1``) with a bypass lane and no backplane data exchange, and an 8-input UCORR44 correlator that reads out four spectral bins locally. The corner-turned data is not offloaded in real time. The 100G QSFP link (``DATA_LINK_TYPE = RAW_CGE``) carries only the raw ADC streamer: ``rawpack`` and ``cge`` without ``upack``, so the link needs no UltraRAM and the correlator keeps its 64 blocks. The 100G logic is placed with ``crs_physical_constraints_raw_cge.xdc``; its area overlaps the left columns of the correlator area, which is not changed.

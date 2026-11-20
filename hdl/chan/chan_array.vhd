@@ -140,7 +140,15 @@ entity chan_array is
 		m_axis_ucap_bsb_tdata  : out std_logic_vector(7 downto 0) := (others => '0');
 		m_axis_ucap_bsb_tvalid : out std_logic                    := '0';
 		m_axis_ucap_bsb_tlast  : out std_logic                    := '0';
-		m_axis_ucap_bsb_tready : in std_logic                     := '0'
+		m_axis_ucap_bsb_tready : in std_logic                     := '0';
+
+		-- Copy of the capture bus that feeds UCAP, for the raw ADC streamer (on chan_clk(0)). Driven only when CAPTURE_TYPE=UCAP.
+
+		m_axis_raw_tdata  : out slv_array(0 to max(NUMBER_OF_ADCS, NUMBER_OF_CHANNELIZERS) - 1)(CAPTURE_BITS_PER_WORD - 1 downto 0) := (others => (others => '0'));
+		m_axis_raw_tvalid : out std_logic_vector(0 to NUMBER_OF_CAPTURE_SOURCES - 1)                                             := (others => '0'); -- one per data source
+		m_axis_raw_tlast  : out std_logic_vector(0 to NUMBER_OF_CAPTURE_SOURCES - 1)                                             := (others => '0');
+		m_axis_raw_source : out std_logic_vector(0 to max(NUMBER_OF_ADCS, NUMBER_OF_CHANNELIZERS) - 1)                           := (others => '0'); -- data source currently on tdata for each channel
+		m_axis_raw_rst    : out std_logic                                                                                        := '0' -- reset used by UCAP for its frame counters
 	);
 end entity chan_array;
 
@@ -719,6 +727,13 @@ begin
 
 				end if;
 			end process;
+
+			-- Export the same bus for the raw ADC streamer
+			m_axis_raw_tdata <= chan_mon_reg2_tdata;
+			m_axis_raw_tvalid <= chan_mon_reg2_tvalid;
+			m_axis_raw_tlast <= chan_mon_reg2_tlast;
+			m_axis_raw_source <= ucap_source_ack2;
+			m_axis_raw_rst <= ucap_rst_reg;
 
 			ucap0: entity work.ucap
 				generic map (

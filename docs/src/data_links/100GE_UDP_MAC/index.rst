@@ -10,9 +10,11 @@ The 100G Ethernet UDP/MAC modules implement high-speed Ethernet communication us
 The 100G Ethernet system consists of:
 
 - :entity:`cge`: 100G Ethernet core module that implements the CMAC (100G Ethernet Media Access Control) interface, providing packet transmission and reception capabilities with memory-mapped configuration and monitoring
+- :entity:`rawpack`: Raw ADC sample streamer. Sends the 14-bit samples of one or two channels over the 100G link instead of the corner-turned data
 
 .. toctree::
    :maxdepth: 2
    :hidden:
 
    cge
+   rawpack

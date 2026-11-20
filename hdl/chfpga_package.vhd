@@ -411,7 +411,7 @@ type corr_type_enum IS (CORR44, UCORR44, NONE);
 -- real-time offload link types
 
 
-type data_link_type_enum is (NONE, XGE, UPACK_CGE);
+type data_link_type_enum is (NONE, XGE, UPACK_CGE, RAW_CGE); -- RAW_CGE: 100G link carrying only the raw ADC streamer (no UPACK)
 
 
 constant NUMBER_OF_CORRELATORS_MAX: INTEGER :=8; -- Maximum number of correlators supported by the system
