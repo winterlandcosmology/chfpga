@@ -114,6 +114,7 @@ entity chfpga_crs is
 		-- Real-time data offload links configuration
 
 		DATA_LINK_TYPE: data_link_type_enum := CONFIG_DATA_LINK_TYPE; --
+		NUMBER_OF_CGE_LINKS: integer range 1 to 2 := CONFIG_NUMBER_OF_CGE_LINKS; -- 100G links. 2: a second link on SFP28 cages 1 to 4, for raw ADC streams.
 		DATA_LINK_LINK_TO_QUAD_MAP: integer_array   := (0 to 3=> 0); -- Channels 0-3 use QUAD0, Channels 4-7 use QUAD1. Ignored if DATA_LINK_TYPE is NONE
 		DATA_LINK_QUAD_TO_REFCLK_MAP: integer_array    := (0 to 0=>0); -- Both QUAD0 and QUAD1 use refclk(0)
 
@@ -180,6 +181,12 @@ entity chfpga_crs is
 
 		qsfp_txn: out std_logic_vector(0 to 3);
 		qsfp_txp: out std_logic_vector(0 to 3);
+
+		-- SFP28 cages 1 to 4: the four lanes of the second 100G link (NUMBER_OF_CGE_LINKS = 2).
+		-- Its reference clock is bp_shuffle_refclk(0) (156.25 MHz), which the corner-turn engine does not use with CT_LEVEL = 1.
+
+		sfp_txn: out std_logic_vector(0 to 3);
+		sfp_txp: out std_logic_vector(0 to 3);
 
 		-- Corner-turn engine shuffle links
 
@@ -274,6 +281,7 @@ architecture impl of chfpga_crs is
 	-- "None" tells the tools not to implement an IO port. "OBUF" implements the IO port.
 	--  In the case of "OBUF", it looks like the output buffer is adapted to the type of output such as a transceiver output etc.
 	attribute io_buffer_type of qsfp_txp, qsfp_txn: signal is sel(DATA_LINK_TYPE = UPACK_CGE, "OBUF", "NONE");
+	attribute io_buffer_type of sfp_txp, sfp_txn: signal is sel(DATA_LINK_TYPE = UPACK_CGE and NUMBER_OF_CGE_LINKS > 1, "OBUF", "NONE");
 	attribute io_buffer_type of clk156_p, clk156_n: signal is sel(DATA_LINK_TYPE = UPACK_CGE, "IBUF", "NONE");
 	attribute io_buffer_type of bp_shuffle_tx_p, bp_shuffle_tx_n: signal is sel(CT_LEVEL > 1, "OBUF", "NONE");
 
@@ -897,6 +905,7 @@ begin
 			-- Real time Ethernet data streaming interface
 
 			DATA_LINK_TYPE        => DATA_LINK_TYPE,
+			NUMBER_OF_CGE_LINKS   => NUMBER_OF_CGE_LINKS,
 			DATA_LINK_LINK_TO_QUAD_MAP                => DATA_LINK_LINK_TO_QUAD_MAP,
 			DATA_LINK_QUAD_TO_REFCLK_MAP                 => DATA_LINK_QUAD_TO_REFCLK_MAP,
 
@@ -982,6 +991,12 @@ begin
 			cge_tx_n     => qsfp_txn,
 			cge_refclk_p => clk156_p,
 			cge_refclk_n => clk156_n,
+
+			-- Second 100GE interface
+			cge1_tx_p     => sfp_txp,
+			cge1_tx_n     => sfp_txn,
+			cge1_refclk_p => bp_shuffle_refclk_p(0),
+			cge1_refclk_n => bp_shuffle_refclk_n(0),
 
 			-- debug bus
 			-- debug_out => debug_out,

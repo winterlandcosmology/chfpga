@@ -120,6 +120,8 @@ Data offload parameters
 
 - **CONFIG_DATA_LINK_TYPE** (data_link_type_enum): Real-time data offload type. ``NONE``: no offload. ``XGE``: 8×10G Ethernet. ``UPACK_CGE``: 100G Ethernet via UPACK + CGE. ct configs use XGE (IceBoard) or UPACK_CGE (CRS, ZCU111); corr configs typically use NONE.
 
+- **CONFIG_NUMBER_OF_CGE_LINKS** (integer, CRS only): Number of 100G links with a 100G link type. ``1``: the QSFP28 port. ``2``: also a second link on the SFP28 cages 1 to 4 (second hard MAC), which carries only the raw ADC streams C and D of ``rawpack``.
+
 .. _config_data_link_link_to_quad_map:
 
 - **CONFIG_DATA_LINK_LINK_TO_QUAD_MAP** (integer_array): Maps each data link to a GTY quad index. Used when CONFIG_DATA_LINK_TYPE is UPACK_CGE. Example: ``(0 to 3 => 0)`` = single quad for 100G.

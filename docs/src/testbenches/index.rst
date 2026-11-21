@@ -164,6 +164,26 @@ cge
 
 Tests the 100G Ethernet corner-turn engine (CGE). Verifies corner-turn operations, packet handling, and Ethernet interface integration.
 
+rawpack
+~~~~~~~
+
+**File:** ``hdl/testbenches/rawpack_testbench.vhd``
+
+**Run with:** ``xilinx_projects/testbenches/rawpack_testbench/run.sh [GENERIC=value ...]`` (Vivado simulator, no project needed)
+
+Self-checking test of the raw ADC sample streamer, with one or two 100G links (``LINKS``) and any set of streams (``STREAM_ENABLE``). Drives a known pattern on the capture bus, enables the stream through the BSB registers and checks every packet: Ethernet/IP/UDP headers, IP checksum, the order of the two streams, the packet counter and the continuity of the timestamps of each stream, and every sample. Also checks the upstream bus of link 0, which carries frames of the length of the ``upack`` frames back to back: it passes through before the streams are enabled and after they are disabled, and every upstream frame that comes out is complete. ``SWEEP=485`` starts and stops the streams at every position of an upstream frame. ``PASS_MUTE=1`` stops the upstream transmitter in the middle of a frame: the module must close that frame. Generics select the channels, the data source, the packet size and gaps in the input (``GAP_PERIOD``). ``DUMP_FILE`` writes the packets to a file for use by host software tests. ``run_all.sh`` runs all the cases.
+
+**Pass-through test:** ``hdl/testbenches/rawpack_pass_testbench.vhd``, run with ``xilinx_projects/testbenches/rawpack_testbench/run_pass.sh``. No stream is enabled: the output of link 0 must be the upstream bus delayed by one clock, word for word, with random frames and gaps and across resets.
+
+rawpack_cge
+~~~~~~~~~~~
+
+**Files:** ``hdl/testbenches/rawpack_cge_testbench.vhd``, ``hdl/testbenches/cmac_usplus_1_sim_model.vhd``
+
+**Run with:** ``xilinx_projects/testbenches/rawpack_testbench/run_chain.sh [GENERIC=value ...]``
+
+Full-rate test of the chain capture bus, ``rawpack``, ``cge``, with one ``cge`` and one MAC model for each 100G link (``LINKS``, 2 by default). The Xilinx 100G MAC inside ``cge`` is replaced by a behavioural model that paces the transmit stream at the 100 Gb/s line rate (including preamble, FCS and inter-frame gap), fails on a transmit underflow and writes every frame to a file. Link 0 also gets upstream frames with the timing of ``upack`` (``UPSTREAM``: 0 none, as in corr8; 1 all the time; 2 stopped in the middle of a frame during the runs), and ``RUNS`` sets the number of start and stop cycles. The testbench fails if any FIFO overflows, and ``check_frames.py`` then checks all the frames: headers, no packet lost, every sample, and that every upstream frame out of the MAC model is complete.
+
 cge_test
 ~~~~~~~~
 
