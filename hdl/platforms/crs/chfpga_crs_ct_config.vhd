@@ -30,6 +30,7 @@ package chfpga_config is
 
     -- 10/100G Ethernet Real-time data offload links configuration
     constant CONFIG_DATA_LINK_TYPE: data_link_type_enum       := UPACK_CGE;
+    constant CONFIG_NUMBER_OF_CGE_LINKS: integer := 2; -- 100G links. 2: a second link on SFP28 cages 1 to 4, for raw ADC streams (needs a 100G link type)
 
 
 end chfpga_config;
